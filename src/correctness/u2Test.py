@@ -1,0 +1,113 @@
+from circuit_generator import *
+from ini_generator import *
+from test_util import *
+
+# Test for Unitary 2-qubit gate
+
+# N    = 8
+# NGQB =  2
+# NSQB =  4
+# NLQB =  2
+
+class u2Test:
+    def __init__(self):
+        self.setting = {'total_qbit':'8',
+                        'device_qbit':'2',
+                        'file_qbit':'2',
+                        'thread_qbit':'2',
+                        'local_qbit':'2',
+                        'max_qbit':'38',
+                        'testing':'1',
+                        'state_paths':'./state/path1,./state/path2,./state/path3,./state/path4'}
+        self.ini_path='test.ini'
+        self.cir_path='cir_test'
+        
+        self.N    =  int(self.setting['total_qbit'])
+        self.NGQB =  int(self.setting['file_qbit'])
+        self.NDQB =  int(self.setting['device_qbit'])
+        self.world_size = 1<<self.NDQB
+        self.NSQB =  int(self.setting['file_qbit'])
+        self.setting['thread_qbit'] = self.setting['file_qbit']
+        self.NLQB =  int(self.setting['local_qbit'])
+        self.qubit_type = ["Device","File", "Middle", "Local"]
+        self.range_type = [range(2), range(2, 4), range(4, 6), range(6, 8)]
+
+    def _test(self, name, x_range, y_range):
+        print(name,"Testing")
+        flag = True
+        for x in x_range:
+            for y in y_range:
+                if x==y: continue
+                circuit=get_circuit()
+                for i in range(self.N):
+                    H(circuit, i)
+                real = [ 0.65396611,  0.04869761, -0.02532728, -0.75452992,
+                         0.38302748, -0.80093799, -0.35552298,  0.29221858,
+                        -0.55736732, -0.57963226,  0.27007049, -0.52955646,
+                         0.33905744, -0.14196239,  0.89444053,  0.25468188]
+                imag = [0, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0]
+                U2(circuit, x, y, real, imag)
+                create_circuit(circuit, self.cir_path)
+
+                flag=self.execute(name)
+                if(not flag): break
+            if(not flag): break
+        if(flag):
+            print('****************************',name,' Pass','****************************')
+        if(not flag):
+            print("[X]", name, ": not pass under 1e-9", flush=True)
+            print("===========================")
+        return flag
+    def execute(self,name):
+        if self.world_size!=1:
+            # os.chdir("..")
+            # os.system('make clean')
+            # os.system('make')
+            # print("[SCP End]")
+            # os.chdir('correctness')
+            # print('[Move End]')
+            os.system("rm -r state0/*")
+            os.system("rm -r state1/*")
+            os.system("rm -r state2/*")
+            os.system("rm -r state3/*")
+            # os.system('scp -q -r /home/paslab/Desktop/new_file/stateVector/src paslab@140.112.90.50:/home/paslab/Desktop/new_file/stateVector/')
+            os.system(f"mpirun.mpich -np {self.world_size} ../qSim.out -i {self.ini_path} -c {self.cir_path}")
+            # exit(1)
+            os.system("cp ./state1/path1 ./state0/path5")
+            os.system("cp ./state1/path2 ./state0/path6")
+            os.system("cp ./state1/path3 ./state0/path7")
+            os.system("cp ./state1/path4 ./state0/path8")
+            os.system("cp ./state2/path1 ./state0/path9")
+            os.system("cp ./state2/path2 ./state0/path10")
+            os.system("cp ./state2/path3 ./state0/path11")
+            os.system("cp ./state2/path4 ./state0/path12")
+            os.system("cp ./state3/path1 ./state0/path13")
+            os.system("cp ./state3/path2 ./state0/path14")
+            os.system("cp ./state3/path3 ./state0/path15")
+            os.system("cp ./state3/path4 ./state0/path16")
+        else:
+            os.system(f"../qSim.out -i {self.ini_path} -c {self.cir_path} >> /dev/null")
+        # os.system(f"../qSim.out -i {self.ini_path} -c {self.cir_path}")
+        return simple_test(name, False, self.cir_path, "../path/set9.txt", self.N, self.NGQB+self.NDQB, True)
+
+    def test(self):
+        create_ini(self.setting, self.ini_path)
+        flag = True
+        for i in range(4):
+            for j in range(i,4):
+                q0_type = self.qubit_type[i]
+                q1_type = self.qubit_type[j]
+                test_name = f"{q0_type}-{q1_type}"
+                flag = self._test(test_name, self.range_type[i], self.range_type[j])
+                if not flag:    break
+            if not flag:    break 
+
+        if(flag):
+            print("[PASS]", "u2Test", ": match with qiskit under 1e-9", flush=True)
+        else:
+            print("[x]", "u2Test", ": not pass under 1e-9", flush=True)
+        print("===========================")
+        return flag
