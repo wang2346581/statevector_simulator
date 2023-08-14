@@ -5,222 +5,33 @@
 #include "common.h"
 #include "gate.h"
 #include "gate_util.h"
-#include <mpi.h>
+#include <omp.h>
+
+#define min(a,b) ((a) < (b) ? (a) : (b))
+
 void set_outer(ull outer){
     _outer = outer;
     _half_outer = _outer/2;
     _half_outer_size = _half_outer * sizeof(Type);
 }
 
-inline void _thread_CX(setStreamv2 *s){
+inline void _thread_CX(setStreamv2 *s, int *counter){
     for(ull i = 0; i < loop_size; i += _outer){
-        inner_loop_func(_outer, s->rd, s->fd, s->fd_off);
+        inner_loop_func(_outer, s->rd, s->fd, s->fd_index, s->fd_off, counter);
     }
 }
 
-inline void _thread_CX_MPI_0(setStreamv2 *s){
-    if(_outer == chunk_state)
-    {
-        if(pread(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-        // printf("[Recv] Rank: %d,Thread: %d, chunk_start %lld\n",rank,s->id,j);
-        MPI_Recv(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-        gate_func((Type *)s->rd);
-
-        // MPI_Send(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD);
-        MPI_Isend(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-        if(pwrite(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-        // printf("[Send] Rank: %d,Thread: %d, chunk_start %lld\n",rank,s->id,j);
-    }
-    else
-    {
-        for (ull j = 0; j < _outer; j += 2*chunk_state)
-        {
-            MPI_Irecv(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);            
-            if(pread(s->fd[0], s->rd + 2 * chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            MPI_Isend(s->rd + 2 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-            if(pread(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-
-            MPI_Wait(&s->request[1],MPI_STATUS_IGNORE);
-            gate_func((Type *)s->rd);
-
-            MPI_Isend(s->rd +     chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);
-            if(pwrite(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-            MPI_Recv(s->rd + 3 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-            if(pwrite(s->fd[0], s->rd + 3 * chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            s->fd_off[0] += 2*chunk_size;
-        }
-    }
-        
-}
-
-inline void _thread_CX_MPI_1(setStreamv2 *s){
-    if(_outer == chunk_state)
-    {
-        if(pread(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-        // printf("[Send] Rank: %d,Thread: %d, chunk_start %lld\n",rank,s->id, j);
-        MPI_Send(s->rd, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD);
-
-        // printf("[Recv] Rank: %d,Thread: %d, chunk_start %lld\n",rank,s->id, j);
-        MPI_Recv(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-        if(pwrite(s->fd[0], s->rd+chunk_size, chunk_size, s->fd_off[0]));
-    }
-    else
-    {
-        for (ull j = 0; j < _outer; j += 2*chunk_state)
-        {
-            MPI_Irecv(s->rd, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-            if(pread(s->fd[0], s->rd + 2 * chunk_size, chunk_size, s->fd_off[0]));
-            MPI_Isend(s->rd + 2 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-            if(pread(s->fd[0], s->rd + chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            
-
-            MPI_Wait(&s->request[0],MPI_STATUS_IGNORE);
-            gate_func((Type *)s->rd);
-
-            MPI_Isend(s->rd, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-            if(pwrite(s->fd[0], s->rd + chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            MPI_Recv(s->rd + 3 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-            if(pwrite(s->fd[0], s->rd + 3 * chunk_size, chunk_size, s->fd_off[0]));
-            s->fd_off[0] += 2*chunk_size;
-        }
-    }
-        
-}
-inline void _thread_CX2_MPI_0(setStreamv2 *s){
-    if(_outer == chunk_state)
-    {
-        MPI_Irecv(s->rd+2*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-        MPI_Irecv(s->rd+3*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[3]);
-        if(pread(s->fd[0], s->rd           , chunk_size, s->fd_off[0]));
-        if(pread(s->fd[1], s->rd+chunk_size, chunk_size, s->fd_off[1]));
-
-        MPI_Waitall(2,&s->request[2],MPI_STATUS_IGNORE);
-
-        gate_func((Type *)s->rd);
-
-        if(pwrite(s->fd[0], s->rd           , chunk_size, s->fd_off[0]));
-        if(pwrite(s->fd[1], s->rd+chunk_size, chunk_size, s->fd_off[1]));
-        MPI_Isend(s->rd+2*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-        MPI_Isend(s->rd+3*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[3]);
-    }
-    else
-    {
-        for (ull j = 0; j < _outer; j += 2*chunk_state)
-        {
-            MPI_Irecv(s->rd+2*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-            MPI_Irecv(s->rd+3*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[3]);
-            if(pread(s->fd[0], s->rd + 4 * chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            MPI_Isend(s->rd + 4 * chunk_size  , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[4]);
-            if(pread(s->fd[1], s->rd + 5 * chunk_size, chunk_size, s->fd_off[1] + chunk_size));
-            MPI_Isend(s->rd + 5 * chunk_size  , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[4]);
-            if(pread(s->fd[0], s->rd           , chunk_size, s->fd_off[0]));
-            if(pread(s->fd[1], s->rd+chunk_size, chunk_size, s->fd_off[1]));
-
-            MPI_Waitall(2,&s->request[2],MPI_STATUS_IGNORE);
-
-            gate_func((Type *)s->rd);
-
-            MPI_Isend(s->rd + 2 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-            MPI_Isend(s->rd + 3 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[3]);
-            if(pwrite(s->fd[0], s->rd           , chunk_size, s->fd_off[0]));
-            if(pwrite(s->fd[1], s->rd+chunk_size, chunk_size, s->fd_off[1]));
-            MPI_Recv(s->rd + 6 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-            if(pwrite(s->fd[0], s->rd + 6 * chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            MPI_Recv(s->rd + 7 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-            if(pwrite(s->fd[1], s->rd + 7 * chunk_size, chunk_size, s->fd_off[1] + chunk_size));      
-            s->fd_off[0] += 2*chunk_size;
-            s->fd_off[1] += 2*chunk_size;
-        }
-    }
-}
-
-inline void _thread_CX2_MPI_1(setStreamv2 *s){
-    if(_outer == chunk_state)
-    {
-        if(pread(s->fd[0], s->rd           , chunk_size, s->fd_off[0]));
-        MPI_Isend(s->rd           , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-        if(pread(s->fd[1], s->rd+chunk_size, chunk_size, s->fd_off[1]));
-        MPI_Isend(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);
-
-        MPI_Recv(s->rd+2*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-        if(pwrite(s->fd[0], s->rd+2*chunk_size, chunk_size, s->fd_off[0]));
-        MPI_Recv(s->rd+3*chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-        if(pwrite(s->fd[1], s->rd+3*chunk_size, chunk_size, s->fd_off[1]));
-    }
-    else
-    {
-        for (ull j = 0; j < _outer; j += 2*chunk_state)
-        {
-            MPI_Irecv(s->rd, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-            MPI_Irecv(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);
-            if(pread(s->fd[0], s->rd + 4 * chunk_size, chunk_size, s->fd_off[0]));
-            MPI_Isend(s->rd + 4 * chunk_size  , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[2]);
-            if(pread(s->fd[1], s->rd + 5 * chunk_size, chunk_size, s->fd_off[1]));
-            MPI_Isend(s->rd + 5 * chunk_size  , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[3]);
-            if(pread(s->fd[0], s->rd + 2 * chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            if(pread(s->fd[1], s->rd + 3 * chunk_size, chunk_size, s->fd_off[1] + chunk_size));
-
-            MPI_Waitall(2,&s->request[0],MPI_STATUS_IGNORE);
-
-            gate_func((Type *)s->rd);
-
-            MPI_Isend(s->rd, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-            MPI_Isend(s->rd + chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);
-            if(pwrite(s->fd[0], s->rd + 2 * chunk_size, chunk_size, s->fd_off[0] + chunk_size));
-            if(pwrite(s->fd[1], s->rd + 3 * chunk_size, chunk_size, s->fd_off[1] + chunk_size));
-            MPI_Recv(s->rd + 6 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-            if(pwrite(s->fd[0], s->rd + 6 * chunk_size, chunk_size, s->fd_off[0]));
-            MPI_Recv(s->rd + 7 * chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-            if(pwrite(s->fd[1], s->rd + 7 * chunk_size, chunk_size, s->fd_off[1]));      
-            s->fd_off[0] += 2*chunk_size;
-            s->fd_off[1] += 2*chunk_size;
-        }
-    }
-}
-inline void _swap_thread_CX_MPI_0(setStreamv2 *s){
-    for (ull j = 0; j < _outer; j += chunk_state)
-    {
-        if(j != 0)
-        {
-            MPI_Wait(&s->request[0],MPI_STATUS_IGNORE);
-        }
-        if(pread(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-        // MPI_Recv(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-        MPI_Irecv(s->rd+chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);
-        // MPI_Send(s->rd           , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD);
-        MPI_Isend(s->rd           , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-        MPI_Wait(&s->request[1],MPI_STATUS_IGNORE);
-        if(pwrite(s->fd[0], s->rd+chunk_size, chunk_size, s->fd_off[0]));
-        s->fd_off[0] += chunk_size;
-    }
-}
-inline void _swap_thread_CX_MPI_1(setStreamv2 *s){
-    for (ull j = 0; j < _outer; j += chunk_state)
-    {
-        if(j != 0)
-        {
-            MPI_Wait(&s->request[0],MPI_STATUS_IGNORE);
-        }
-        if(pread(s->fd[0], s->rd, chunk_size, s->fd_off[0]));
-        MPI_Isend(s->rd             , chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[0]);
-        MPI_Irecv(s->rd + chunk_size, chunk_size, MPI_BYTE, s->partner_rank[0], s->id, MPI_COMM_WORLD,&s->request[1]);
-        MPI_Wait(&s->request[1],MPI_STATUS_IGNORE);
-        if(pwrite(s->fd[0], s->rd+chunk_size, chunk_size, s->fd_off[0]));            
-        s->fd_off[0] += chunk_size;
-    }
-}
-inline void _thread_CX2(setStreamv2 *s){
+inline void _thread_CX2(setStreamv2 *s, int *counter){
     for(ull i = 0; i < loop_size; i += _outer){
-        inner_loop_func(_half_outer, s->rd, s->fd, s->fd_off);
+        inner_loop_func(_half_outer, s->rd, s->fd, s->fd_index, s->fd_off, counter);
         s->fd_off[0] += _half_outer_size;
         s->fd_off[1] += _half_outer_size;
     }
 }
 
-inline void _thread_CX4(setStreamv2 *s){
+inline void _thread_CX4(setStreamv2 *s, int *counter){
     for(ull i = 0; i < loop_size; i += _outer){
-        inner_loop_func(_half_outer, s->rd, s->fd, s->fd_off);
+        inner_loop_func(_half_outer, s->rd, s->fd, s->fd_index, s->fd_off, counter);
         s->fd_off[0] += _half_outer_size;
         s->fd_off[1] += _half_outer_size;
         s->fd_off[2] += _half_outer_size;
@@ -228,9 +39,9 @@ inline void _thread_CX4(setStreamv2 *s){
     }
 }
 
-inline void _thread_CX8(setStreamv2 *s){
+inline void _thread_CX8(setStreamv2 *s, int *counter){
     for(ull i = 0; i < loop_size; i += _outer){
-        inner_loop_func(_half_outer, s->rd, s->fd, s->fd_off);
+        inner_loop_func(_half_outer, s->rd, s->fd, s->fd_index, s->fd_off, counter);
         s->fd_off[0] += _half_outer_size;
         s->fd_off[1] += _half_outer_size;
         s->fd_off[2] += _half_outer_size;
@@ -259,18 +70,75 @@ inline void set_up_lo(int ctrl, int targ){
 }
 
 // fd_off[0] += size * sizeof(Type) afterward
-void inner_loop(ull size, void *rd, int fd[1], ull fd_off[1]){
+void inner_loop(ull size, void *rd, int fd[1], int fd_index[1], ull fd_off[1], int *counter){
+
+#ifdef MEMORY
+    int batch_size = min(size / chunk_state, BATCH_SIZE);
+#endif
+
     for (ull i = 0; i < size; i += chunk_state){
+
+#ifdef MEMORY
+        int now_idx = *counter % batch_size;
+        if (now_idx == 0) {
+
+            if (client[fd_index[0]].num_write) {
+                poll_cq_batch(client + fd_index[0], client[fd_index[0]].num_write);
+                client[fd_index[0]].num_write = 0;
+            }
+
+            for(int idx = 0; idx < batch_size; idx++) {
+                if (fd_off[0] + idx * chunk_size < SNAPSHOT_SIZE) {
+                    memcpy(client[fd_index[0]].buffer + idx * chunk_size, client[fd_index[0]].local_cache + fd_off[0] + idx * chunk_size, chunk_size);
+                } else {
+                    read_remote(client + fd_index[0], idx * chunk_size, fd_off[0] + idx * chunk_size, chunk_size, 0);
+                    client[fd_index[0]].num_read++;
+                }
+            }
+
+            if (client[fd_index[0]].num_read) {
+                poll_cq_batch(client + fd_index[0], client[fd_index[0]].num_read);
+                client[fd_index[0]].num_read = 0;
+            }
+        
+        }
+        if (gate_func((Type *)(client[fd_index[0]].buffer + now_idx * chunk_size))) {
+            if (fd_off[0] < SNAPSHOT_SIZE) {
+                memcpy(client[fd_index[0]].local_cache + fd_off[0], client[fd_index[0]].buffer + now_idx * chunk_size, chunk_size);
+            } else {
+                write_remote(client + fd_index[0], now_idx * chunk_size, fd_off[0], chunk_size, 0);
+                client[fd_index[0]].num_write++;
+            }
+        }
+#else
         if(pread (fd[0], rd, chunk_size, fd_off[0]));
         gate_func((Type *)rd);
         if(pwrite(fd[0], rd, chunk_size, fd_off[0]));
+#endif
+
         fd_off[0] += chunk_size;
+        *counter += 1;
+
+        // printf("counter = %d\n", *counter);
+
     }
+#ifdef MEMORY
+//     if (client[fd_index[0]].num_write) {
+//         poll_cq_batch(client + fd_index[0], client[fd_index[0]].num_write);
+//         client[fd_index[0]].num_write = 0;
+//     }
+#endif
 }
 
-void inner_loop_read(ull size, void *rd, int fd[1], ull fd_off[1]){
+void inner_loop_read(ull size, void *rd, int fd[1], int fd_index[1], ull fd_off[1], int *counter){
     for (ull i = 0; i < size; i += chunk_state){
+
+#ifdef MEMORY
+        memcpy(rd, client[fd_index[0]].buffer + fd_off[0], chunk_size);
+#else
         if(pread (fd[0], rd, chunk_size, fd_off[0]));
+#endif
+
         gate_func((Type *)rd);
         fd_off[0] += chunk_size;
     }
@@ -278,63 +146,261 @@ void inner_loop_read(ull size, void *rd, int fd[1], ull fd_off[1]){
 
 // fd_off[0] += size * sizeof(Type) afterward
 // fd_off[1] += size * sizeof(Type) afterward
-void inner_loop2(ull size, void *rd, int fd[2], ull fd_off[2]){
+void inner_loop2(ull size, void *rd, int fd[2], int fd_index[2], ull fd_off[2], int *counter){
+
+    // printf("[Thread %d] size / chunk_state = %lld, file = %d %d, offset = %lld %lld\n", omp_get_thread_num(), size / chunk_state, fd_index[0], fd_index[1], fd_off[0], fd_off[1]);
+
+#ifdef MEMORY
+    int batch_size = min(size / chunk_state, BATCH_SIZE);
+#endif
+
     for (ull i = 0; i < size; i += chunk_state){
-        if(pread (fd[0], rd,           chunk_size, fd_off[0]));
+
+#ifdef MEMORY
+        int now_idx = *counter % batch_size;
+        if (now_idx == 0) {
+            for(int cnt = 0; cnt < 2; cnt++) {
+                if (client[fd_index[cnt]].num_write) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+                    client[fd_index[cnt]].num_write = 0;
+                }
+            }
+
+            for(int cnt = 0; cnt < 2; cnt++)
+                for(int idx = 0; idx < batch_size; idx++) {
+                    if (fd_off[cnt] + idx * chunk_size < SNAPSHOT_SIZE) {
+                        memcpy(client[fd_index[cnt]].buffer + (cnt * batch_size + idx) * chunk_size, client[fd_index[cnt]].local_cache + fd_off[cnt] + idx * chunk_size, chunk_size);
+                    } else {
+                        read_remote(client + fd_index[cnt], (cnt * batch_size + idx) * chunk_size, fd_off[cnt] + idx * chunk_size, chunk_size, 0);
+                        client[fd_index[cnt]].num_read++;
+                    }
+                }
+
+            for(int cnt = 0; cnt < 2; cnt++) {
+                if (client[fd_index[cnt]].num_read) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_read);
+                    client[fd_index[cnt]].num_read = 0;
+                }
+            }
+        }
+        memcpy(rd,            client[fd_index[0]].buffer + now_idx * chunk_size,                           chunk_size);
+        memcpy(rd+chunk_size, client[fd_index[1]].buffer + now_idx * chunk_size + batch_size * chunk_size, chunk_size);
+        if (gate_func((Type *)rd)){
+            if (fd_off[0] < SNAPSHOT_SIZE) {
+                memcpy(client[fd_index[0]].local_cache + fd_off[0], rd, chunk_size);
+            } else {
+                memcpy(client[fd_index[0]].buffer + now_idx * chunk_size, rd, chunk_size);
+                write_remote(client + fd_index[0], now_idx * chunk_size, fd_off[0], chunk_size, 0);
+                client[fd_index[0]].num_write++;
+            }
+
+            if (fd_off[1] < SNAPSHOT_SIZE) {
+                memcpy(client[fd_index[1]].local_cache + fd_off[1], rd + chunk_size, chunk_size);
+            } else {
+                memcpy(client[fd_index[1]].buffer + now_idx * chunk_size + batch_size * chunk_size, rd + chunk_size, chunk_size);
+                write_remote(client + fd_index[1], now_idx * chunk_size + batch_size * chunk_size, fd_off[1], chunk_size, 0);
+                client[fd_index[1]].num_write++;
+            }
+        }
+#else
+        if(pread (fd[0], rd,            chunk_size, fd_off[0]));
         if(pread (fd[1], rd+chunk_size, chunk_size, fd_off[1]));
-
         gate_func((Type *)rd);
-
-        if(pwrite(fd[0], rd,           chunk_size, fd_off[0]));
+        if(pwrite(fd[0], rd,            chunk_size, fd_off[0]));
         if(pwrite(fd[1], rd+chunk_size, chunk_size, fd_off[1]));
+#endif
+
         fd_off[0] += chunk_size;
         fd_off[1] += chunk_size;
+        *counter += 1;
     }
+
+#ifdef MEMORY
+    // for(int cnt = 0; cnt < 2; cnt++) {
+    //     if (client[fd_index[cnt]].num_write) {
+    //         poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+    //         client[fd_index[cnt]].num_write = 0;
+    //     }
+    // }
+#endif
 }
 
-void inner_loop2_read(ull size, void *rd, int fd[2], ull fd_off[2]){
+void inner_loop2_read(ull size, void *rd, int fd[2], int fd_index[2], ull fd_off[2], int *counter){
     for (ull i = 0; i < size; i += chunk_state){
-        if(pread (fd[0], rd,           chunk_size, fd_off[0]));
+
+#ifdef MEMORY
+        memcpy(rd,            client[fd_index[0]].buffer + fd_off[0], chunk_size);
+        memcpy(rd+chunk_size, client[fd_index[1]].buffer + fd_off[1], chunk_size);
+#else
+        if(pread (fd[0], rd,            chunk_size, fd_off[0]));
         if(pread (fd[1], rd+chunk_size, chunk_size, fd_off[1]));
+#endif
+
         gate_func((Type *)rd);
         fd_off[0] += chunk_size;
         fd_off[1] += chunk_size;
     }
 }
 
-void inner_loop2_swap(ull size, void *rd, int fd[2], ull fd_off[2]){
-    for (ull i = 0; i < size; i += chunk_state){
-        if(pread (fd[0], rd + chunk_size, chunk_size, fd_off[0]));
-        if(pread (fd[1], rd,             chunk_size, fd_off[1]));
+void inner_loop2_swap(ull size, void *rd, int fd[2], int fd_index[2], ull fd_off[2], int *counter){
+    
+#ifdef MEMORY
+    int batch_size = min(size / chunk_state, BATCH_SIZE);
+#endif
 
-        if(pwrite(fd[0], rd,             chunk_size, fd_off[0]));
+    for (ull i = 0; i < size; i += chunk_state){
+
+#ifdef MEMORY
+        int now_idx = *counter % batch_size;
+        if (now_idx == 0) {
+            for(int cnt = 0; cnt < 2; cnt++) {
+                if (client[fd_index[cnt]].num_write) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+                    client[fd_index[cnt]].num_write = 0;
+                }
+            }
+
+            for(int cnt = 0; cnt < 2; cnt++)
+                for(int idx = 0; idx < batch_size; idx++) {
+                    if (fd_off[cnt] + idx * chunk_size < SNAPSHOT_SIZE) {
+                        memcpy(client[fd_index[cnt]].buffer + (cnt * batch_size + idx) * chunk_size, client[fd_index[cnt]].local_cache + fd_off[cnt] + idx * chunk_size, chunk_size);
+                    } else {
+                        read_remote(client + fd_index[cnt], (cnt * batch_size + idx) * chunk_size, fd_off[cnt] + idx * chunk_size, chunk_size, 0);
+                        client[fd_index[cnt]].num_read++;
+                    }
+                }
+
+            for(int cnt = 0; cnt < 2; cnt++) {
+                if (client[fd_index[cnt]].num_read) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_read);
+                    client[fd_index[cnt]].num_read = 0;
+                }
+            }
+        }
+        memcpy(rd,            client[fd_index[0]].buffer + now_idx * chunk_size,                           chunk_size);
+        memcpy(rd+chunk_size, client[fd_index[1]].buffer + now_idx * chunk_size + batch_size * chunk_size, chunk_size);
+        
+        if (fd_off[0] < SNAPSHOT_SIZE) {
+            memcpy(client[fd_index[0]].local_cache + fd_off[0], rd + chunk_size, chunk_size);
+        } else {
+            memcpy(client[fd_index[0]].buffer + now_idx * chunk_size,                           rd+chunk_size, chunk_size);
+            write_remote(client + fd_index[0], now_idx * chunk_size, fd_off[0], chunk_size, 0);
+            client[fd_index[0]].num_write++;
+        }
+
+        if (fd_off[1] < SNAPSHOT_SIZE) {
+            memcpy(client[fd_index[1]].local_cache + fd_off[1], rd, chunk_size);
+        } else {
+            memcpy(client[fd_index[1]].buffer + now_idx * chunk_size + batch_size * chunk_size, rd,            chunk_size);
+            write_remote(client + fd_index[1], now_idx * chunk_size + batch_size * chunk_size, fd_off[1], chunk_size, 0);
+            client[fd_index[1]].num_write++;
+        }
+#else
+        if(pread (fd[0], rd + chunk_size, chunk_size, fd_off[0]));
+        if(pread (fd[1], rd,              chunk_size, fd_off[1]));
+        if(pwrite(fd[0], rd,              chunk_size, fd_off[0]));
         if(pwrite(fd[1], rd + chunk_size, chunk_size, fd_off[1]));
+#endif
+
         fd_off[0] += chunk_size;
         fd_off[1] += chunk_size;
+        *counter += 1;
     }
+
+#ifdef MEMORY
+    // for(int cnt = 0; cnt < 2; cnt++) {
+    //     if (client[fd_index[cnt]].num_write) {
+    //         poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+    //         client[fd_index[cnt]].num_write = 0;
+    //     }
+    // }
+#endif
 }
 
-void inner_loop4(ull size, void *rd, int fd[4], ull fd_off[4]){
+void inner_loop4(ull size, void *rd, int fd[4], int fd_index[4], ull fd_off[4], int *counter){
+    
+#ifdef MEMORY
+    int batch_size = min(size / chunk_state, BATCH_SIZE);
+#endif
+
     for (ull i = 0; i < size; i += chunk_state){
-        if(pread (fd[0], rd,               chunk_size, fd_off[0]));
+
+#ifdef MEMORY
+        int now_idx = *counter % batch_size;
+        if (now_idx == 0) {
+            for(int cnt = 0; cnt < 4; cnt++) {
+                if (client[fd_index[cnt]].num_write) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+                    client[fd_index[cnt]].num_write = 0;
+                }
+            }
+
+            for(int cnt = 0; cnt < 4; cnt++)
+                for(int idx = 0; idx < batch_size; idx++) {
+                    if (fd_off[cnt] + idx * chunk_size < SNAPSHOT_SIZE) {
+                        memcpy(client[fd_index[cnt]].buffer + (cnt * batch_size + idx) * chunk_size, client[fd_index[cnt]].local_cache + fd_off[cnt] + idx * chunk_size, chunk_size);
+                    } else {
+                        read_remote(client + fd_index[cnt], (cnt * batch_size + idx) * chunk_size, fd_off[cnt] + idx * chunk_size, chunk_size, 0);
+                        client[fd_index[cnt]].num_read++;
+                    }
+                }
+
+            for(int cnt = 0; cnt < 4; cnt++) {
+                if (client[fd_index[cnt]].num_read) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_read);
+                    client[fd_index[cnt]].num_read = 0;
+                }
+            }
+        }
+        for(int cnt = 0; cnt < 4; cnt++) {
+            memcpy(rd + cnt * chunk_size, client[fd_index[cnt]].buffer + now_idx * chunk_size + cnt * batch_size * chunk_size, chunk_size);
+        }
+        if (gate_func((Type *)rd)){
+            for(int cnt = 0; cnt < 4; cnt++) {
+                if (fd_off[cnt] < SNAPSHOT_SIZE) {
+                    memcpy(client[fd_index[cnt]].local_cache + fd_off[cnt], rd + cnt * chunk_size, chunk_size);
+                } else {
+                    memcpy(client[fd_index[cnt]].buffer + now_idx * chunk_size + cnt * batch_size * chunk_size, rd + cnt * chunk_size, chunk_size);
+                    write_remote(client + fd_index[cnt], now_idx * chunk_size + cnt * batch_size * chunk_size, fd_off[cnt], chunk_size, 0);
+                    client[fd_index[cnt]].num_write++;
+                }
+            }
+        }
+#else
+        if(pread (fd[0], rd,                chunk_size, fd_off[0]));
         if(pread (fd[1], rd +   chunk_size, chunk_size, fd_off[1]));
         if(pread (fd[2], rd + 2*chunk_size, chunk_size, fd_off[2]));
         if(pread (fd[3], rd + 3*chunk_size, chunk_size, fd_off[3]));
-
         gate_func((Type *)rd);
-
         if(pwrite(fd[0], rd,               chunk_size, fd_off[0]));
         if(pwrite(fd[1], rd +   chunk_size, chunk_size, fd_off[1]));
         if(pwrite(fd[2], rd + 2*chunk_size, chunk_size, fd_off[2]));
         if(pwrite(fd[3], rd + 3*chunk_size, chunk_size, fd_off[3]));
+#endif
+
         fd_off[0] += chunk_size;
         fd_off[1] += chunk_size;
         fd_off[2] += chunk_size;
         fd_off[3] += chunk_size;
+        *counter += 1;
     }
+
+#ifdef MEMORY
+    // for(int cnt = 0; cnt < 4; cnt++) {
+    //     if (client[fd_index[cnt]].num_write) {
+    //         poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+    //         client[fd_index[cnt]].num_write = 0;
+    //     }
+    // }
+#endif
 }
 
-void inner_loop8(ull size, void *rd, int fd[8], ull fd_off[8]){
+void inner_loop8(ull size, void *rd, int fd[8], int fd_index[8], ull fd_off[8], int *counter){
+    
+#ifdef MEMORY
+    int batch_size = min(size / chunk_state, BATCH_SIZE);
+#endif
+
     void *rd0 = rd;
     void *rd1 = rd + 1*chunk_size;
     void *rd2 = rd + 2*chunk_size;
@@ -345,6 +411,49 @@ void inner_loop8(ull size, void *rd, int fd[8], ull fd_off[8]){
     void *rd7 = rd + 7*chunk_size;
 
     for (ull i = 0; i < size; i += chunk_state){
+
+#ifdef MEMORY
+        int now_idx = *counter % batch_size;
+        if (now_idx == 0) {
+            for(int cnt = 0; cnt < 8; cnt++) {
+                if (client[fd_index[cnt]].num_write) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+                    client[fd_index[cnt]].num_write = 0;
+                }
+            }
+
+            for(int cnt = 0; cnt < 8; cnt++)
+                for(int idx = 0; idx < batch_size; idx++) {
+                    if (fd_off[cnt] + idx * chunk_size < SNAPSHOT_SIZE) {
+                        memcpy(client[fd_index[cnt]].buffer + (cnt * batch_size + idx) * chunk_size, client[fd_index[cnt]].local_cache + fd_off[cnt] + idx * chunk_size, chunk_size);
+                    } else {
+                        read_remote(client + fd_index[cnt], (cnt * batch_size + idx) * chunk_size, fd_off[cnt] + idx * chunk_size, chunk_size, 0);
+                        client[fd_index[cnt]].num_read++;
+                    }
+                }
+
+            for(int cnt = 0; cnt < 8; cnt++) {
+                if (client[fd_index[cnt]].num_read) {
+                    poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_read);
+                    client[fd_index[cnt]].num_read = 0;
+                }
+            }
+        }
+        for(int cnt = 0; cnt < 8; cnt++) {
+            memcpy(rd + cnt * chunk_size, client[fd_index[cnt]].buffer + now_idx * chunk_size + cnt * batch_size * chunk_size, chunk_size);
+        }
+        if (gate_func((Type *)rd)){
+            for(int cnt = 0; cnt < 8; cnt++) {
+                if (fd_off[cnt] < SNAPSHOT_SIZE) {
+                    memcpy(client[fd_index[cnt]].local_cache + fd_off[cnt], rd + cnt * chunk_size, chunk_size);
+                } else {
+                    memcpy(client[fd_index[cnt]].buffer + now_idx * chunk_size + cnt * batch_size * chunk_size, rd + cnt * chunk_size, chunk_size);
+                    write_remote(client + fd_index[cnt], now_idx * chunk_size + cnt * batch_size * chunk_size, fd_off[cnt], chunk_size, 0);
+                    client[fd_index[cnt]].num_write++;
+                }
+            }
+        }
+#else
         if(pread (fd[0], rd0, chunk_size, fd_off[0]));
         if(pread (fd[1], rd1, chunk_size, fd_off[1]));
         if(pread (fd[2], rd2, chunk_size, fd_off[2]));
@@ -353,9 +462,7 @@ void inner_loop8(ull size, void *rd, int fd[8], ull fd_off[8]){
         if(pread (fd[5], rd5, chunk_size, fd_off[5]));
         if(pread (fd[6], rd6, chunk_size, fd_off[6]));
         if(pread (fd[7], rd7, chunk_size, fd_off[7]));
-
         gate_func((Type *)rd);
-
         if(pwrite(fd[0], rd0, chunk_size, fd_off[0]));
         if(pwrite(fd[1], rd1, chunk_size, fd_off[1]));
         if(pwrite(fd[2], rd2, chunk_size, fd_off[2]));
@@ -364,6 +471,7 @@ void inner_loop8(ull size, void *rd, int fd[8], ull fd_off[8]){
         if(pwrite(fd[5], rd5, chunk_size, fd_off[5]));
         if(pwrite(fd[6], rd6, chunk_size, fd_off[6]));
         if(pwrite(fd[7], rd7, chunk_size, fd_off[7]));
+#endif
 
         fd_off[0] += chunk_size;
         fd_off[1] += chunk_size;
@@ -373,7 +481,17 @@ void inner_loop8(ull size, void *rd, int fd[8], ull fd_off[8]){
         fd_off[5] += chunk_size;
         fd_off[6] += chunk_size;
         fd_off[7] += chunk_size;
+        *counter += 1;
     }
+
+#ifdef MEMORY
+    // for(int cnt = 0; cnt < 8; cnt++) {
+    //     if (client[fd_index[cnt]].num_write) {
+    //         poll_cq_batch(client + fd_index[cnt], client[fd_index[cnt]].num_write);
+    //         client[fd_index[cnt]].num_write = 0;
+    //     }
+    // }
+#endif
 }
 
 int isCtrl(int i , int ctrl, int n){

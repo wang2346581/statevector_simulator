@@ -1,37 +1,24 @@
 all: qSim.out
-CC:=mpicc.mpich
-#CC:=gcc
+CC:=gcc
 INCLUDE:=.
-CFLAGS:=-g -O3 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
+CFLAGS:=-g -O3 -lrdmacm -libverbs -march=native
 OMPFLAGES:=-fopenmp
+MEMORY_FLAGS:=-D MEMORY
 
-qSim.out: main.o ini.o init.o common.o gate.o gate_util.o gate_chunk.o measure.o
-	$(CC) $(CFLAGS) $(OMPFLAGES) $^ -o $@ -lm
+RDMA_FILES = rdma/rdma_client.c rdma/rdma_common.c
+RDMA_OBJS = $(RDMA_FILES:.c=.o)
+
+qSim.out: main.o ini.o init.o common.o gate.o gate_util.o gate_chunk.o measure.o $(RDMA_OBJS)
+	$(CC) $^ -o $@ -lm $(CFLAGS) $(OMPFLAGES) $(MEMORY_FLAGS)
 # -lm for math.h
 
-main.o: main.c init.h common.h gate.h
-	$(CC) -I$(INCLUDE) -c $(CFLAGS) $(OMPFLAGES) main.c
-
-init.o: init.c init.h common.h gate.h
-	$(CC) -c $(CFLAGS) $(OMPFLAGES) init.c
-
-common.o: common.c common.h gate.h
-	$(CC) -c $(CFLAGS) $(OMPFLAGES) common.c
-
-gate.o: gate.c common.h gate.h gate_util.h gate_chunk.h
-	$(CC) -c $(CFLAGS) $(OMPFLAGES) gate.c
-
-gate_util.o: gate_util.c gate_util.h common.h gate.h
-	$(CC) -c $(CFLAGS) $(OMPFLAGES) gate_util.c
-
-gate_chunk.o: gate_chunk.c gate_chunk.h common.h gate_util.h
-	$(CC) -c $(CFLAGS) $(OMPFLAGES) gate_chunk.c
-
-measure.o: measure.c measure.h common.h gate.h gate_util.h gate_chunk.h
-	$(CC) -c $(CFLAGS) $(OMPFLAGES) measure.c
-
-ini.o: ini.c ini.h
-	$(CC) -c $(CFLAGS) ini.c
+%.o: %.c
+	$(CC) -c $^ -o $@ $(CFLAGS) $(OMPFLAGES) $(MEMORY_FLAGS)
 
 clean:
-	rm -f qSim.out main.o gate.o gate_chunk.o gate_util.o ini.o init.o common.o measure.o
+	rm -f qSim.out *.o $(RDMA_OBJS)
+
+run: all
+	make clean
+	make
+	./qSim.out -c circuit/8.txt -i myIni.ini

@@ -1,6 +1,5 @@
 #include <math.h>
 #include <omp.h>
-#include <stdio.h>
 #include "common.h"
 #include "gate.h"
 #include "gate_util.h"
@@ -24,7 +23,7 @@ ull targ_offset;
 ull half_ctrl_offset;
 ull half_targ_offset;
 
-void (*gate_ops[16][2])(Type *) = {{H_gate, H_gate},
+bool (*gate_ops[16][2])(Type *) = {{H_gate, H_gate},
                                    {S_gate, Sc_gate},
                                    {T_gate, Tc_gate},
                                    {X_gate, X_gate},
@@ -60,26 +59,32 @@ expressed in row-maj as:
   [[1/sqrt(2),  1/sqrt(2)]
    [1/sqrt(2), -1/sqrt(2)]]]
 */
-void H_gate (Type *q_rd) {
+bool H_gate (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    bool flag = false;
+    double one_over_sqrt2 = 1./sqrt(2);
 
     for (ull i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (ull j = 0; j < gate_move.half_targ; j++){
             q_0r = q_rd[up_off].real;   q_0i = q_rd[up_off].imag;
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
-            q_rd[up_off].real = 1./sqrt(2) * (q_0r + q_1r);
-            q_rd[up_off].imag = 1./sqrt(2) * (q_0i + q_1i);
-            q_rd[lo_off].real = 1./sqrt(2) * (q_0r - q_1r);
-            q_rd[lo_off].imag = 1./sqrt(2) * (q_0i - q_1i);
+            q_rd[up_off].real = one_over_sqrt2 * (q_0r + q_1r);
+            q_rd[up_off].imag = one_over_sqrt2 * (q_0i + q_1i);
+            q_rd[lo_off].real = one_over_sqrt2 * (q_0r - q_1r);
+            q_rd[lo_off].imag = one_over_sqrt2 * (q_0i - q_1i);
+            flag |= (q_0r != q_rd[up_off].real) || (q_0i != q_rd[up_off].imag) || (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
+            // printf("[Before] %f %f %f %f [After] %f %f %f %f\n", q_0r, q_0i, q_1r, q_1i, q_rd[up_off].real, q_rd[up_off].imag, q_rd[lo_off].real, q_rd[lo_off].imag);
             up_off += 1;
             lo_off += 1;
         }
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -89,19 +94,23 @@ expressed in row-maj as:
   [[1,  0]
    [0,  i]]
 */
-void S_gate (Type *q_rd) {
+bool S_gate (Type *q_rd) {
     int lo_off = gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (ull i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (ull j = 0; j < gate_move.half_targ; j++){
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = -q_1i;
             q_rd[lo_off].imag = q_1r;
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off += 1;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -111,9 +120,10 @@ expressed in row-maj as:
   [[1,  0]
    [0, -i]]
 */
-void Sc_gate (Type *q_rd) {
+bool Sc_gate (Type *q_rd) {
     int lo_off = gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (ull i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (ull j = 0; j < gate_move.half_targ; j++){
@@ -122,10 +132,13 @@ void Sc_gate (Type *q_rd) {
             Type_t q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = -q_1i;
             q_rd[lo_off].imag = q_1r;
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off += 1;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -141,19 +154,23 @@ Finally:
   [[1,        0                  ]
    [0,  1/sqrt(2) + i * 1/sqrt(2)]]
 */
-void T_gate (Type *q_rd) {
+bool T_gate (Type *q_rd) {
     int lo_off = gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (ull i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (ull j = 0; j < gate_move.half_targ; j++){
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = 1./sqrt(2) * (q_1r - q_1i);
             q_rd[lo_off].imag = 1./sqrt(2) * (q_1r + q_1i);
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off += 1;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -163,19 +180,23 @@ expressed in row-maj as:
   [[1,        0                  ]
    [0,  1/sqrt(2) - i * 1/sqrt(2)]]
 */
-void Tc_gate (Type *q_rd) {
+bool Tc_gate (Type *q_rd) {
     int lo_off = gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (ull i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (ull j = 0; j < gate_move.half_targ; j++){
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = 1./sqrt(2) * (q_1r + q_1i);
             q_rd[lo_off].imag = 1./sqrt(2) * (q_1r - q_1i);
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off += 1;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -185,11 +206,12 @@ expressed in row-maj as:
   [[0,  1]
    [1,  0]]
 */
-void X_gate (Type *q_rd) {
+bool X_gate (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
@@ -199,12 +221,15 @@ void X_gate (Type *q_rd) {
             q_rd[up_off].imag = q_1i;
             q_rd[lo_off].real = q_0r;
             q_rd[lo_off].imag = q_0i;
+            flag |= (q_0r != q_rd[up_off].real) || (q_0i != q_rd[up_off].imag) || (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             up_off++;
             lo_off++;
         }
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -214,11 +239,12 @@ expressed in row-maj as:
   [[0,  -i]
    [i,   0]]
 */
-void Y_gate (Type *q_rd) {
+bool Y_gate (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
@@ -228,12 +254,15 @@ void Y_gate (Type *q_rd) {
             q_rd[up_off].imag = -q_1r;
             q_rd[lo_off].real = -q_0i;
             q_rd[lo_off].imag = q_0r;
+            flag |= (q_0r != q_rd[up_off].real) || (q_0i != q_rd[up_off].imag) || (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             up_off++;
             lo_off++;
         }
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -243,11 +272,12 @@ expressed in row-maj as:
   [[ 0, i]
    [-i, 0]]
 */
-void Yc_gate (Type *q_rd) {
+bool Yc_gate (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
@@ -257,12 +287,15 @@ void Yc_gate (Type *q_rd) {
             q_rd[up_off].imag = q_1r;
             q_rd[lo_off].real = q_0i;
             q_rd[lo_off].imag = -q_0r;
+            flag |= (q_0r != q_rd[up_off].real) || (q_0i != q_rd[up_off].imag) || (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             up_off++;
             lo_off++;
         }
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -272,20 +305,24 @@ expressed in row-maj as:
   [[1,   0]
    [0,  -1]]
 */
-void Z_gate (Type *q_rd) {
+bool Z_gate (Type *q_rd) {
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = -q_1r;
             q_rd[lo_off].imag = -q_1i;
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off++;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -296,20 +333,24 @@ expressed in row-maj as:
    [0,  exp(theta)]]
 where theta stored at real[0]
 */
-void P_gate (Type *q_rd) {
+bool P_gate (Type *q_rd) {
     // printf("in P_gate\n");
     int lo_off = gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = q_1r*cos(real[0]) - q_1i*sin(real[0]);
             q_rd[lo_off].imag = q_1r*sin(real[0]) + q_1i*cos(real[0]);
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off++;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -320,20 +361,24 @@ expressed in row-maj as:
    [0,  exp(-theta)]]
 where theta stored at real[0]
 */
-void Pc_gate (Type *q_rd) {
+bool Pc_gate (Type *q_rd) {
     // printf("in Pc_gate\n");
     int lo_off = gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
             q_1r = q_rd[lo_off].real;   q_1i = q_rd[lo_off].imag;
             q_rd[lo_off].real = q_1r*cos(real[0]) + q_1i*sin(real[0]);
             q_rd[lo_off].imag = -q_1r*sin(real[0]) + q_1i*cos(real[0]);
+            flag |= (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             lo_off++;
         }
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -348,11 +393,12 @@ expressed in row-maj as:
   [[real[0]+imag[0]*i, real[1]+imag[1]*i]
    [real[2]+imag[2]*i, real[3]+imag[3]*i]]
 */
-void U_gate (Type *q_rd) {
+bool U_gate (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
@@ -362,12 +408,15 @@ void U_gate (Type *q_rd) {
             q_rd[up_off].imag = real[0]*q_0i + real[1]*q_1i + imag[0]*q_0r + imag[1]*q_1r;
             q_rd[lo_off].real = real[2]*q_0r + real[3]*q_1r - imag[2]*q_0i - imag[3]*q_1i;
             q_rd[lo_off].imag = real[2]*q_0i + real[3]*q_1i + imag[2]*q_0r + imag[3]*q_1r;
+            flag |= (q_0r != q_rd[up_off].real) || (q_0i != q_rd[up_off].imag) || (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             up_off++;
             lo_off++;
         }
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*
@@ -382,11 +431,12 @@ expressed in row-maj as:
   [[real[0]-imag[0]*i, real[1]-imag[1]*i]
    [real[2]-imag[2]*i, real[3]-imag[3]*i]]
 */
-void Uc_gate (Type *q_rd) {
+bool Uc_gate (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
     Type_t q_1r;    Type_t q_1i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.half_targ*2) {
         for (int j = 0; j < gate_move.half_targ; j++){
@@ -396,12 +446,15 @@ void Uc_gate (Type *q_rd) {
             q_rd[up_off].imag = -(real[0]*q_0i + real[1]*q_1i + imag[0]*q_0r + imag[1]*q_1r);
             q_rd[lo_off].real =   real[2]*q_0r + real[3]*q_1r + imag[2]*q_0i + imag[3]*q_1i;
             q_rd[lo_off].imag = -(real[2]*q_0i + real[3]*q_1i + imag[2]*q_0r + imag[3]*q_1r);
+            flag |= (q_0r != q_rd[up_off].real) || (q_0i != q_rd[up_off].imag) || (q_1r != q_rd[lo_off].real) || (q_1i != q_rd[lo_off].imag);
             up_off++;
             lo_off++;
         }
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return flag;
+    // return 1;
 }
 
 /*===================================================================
@@ -425,7 +478,7 @@ input: 指向一個存放gate_size這麼多state的buffer。
 gate level (Type II)
 2nd type of 1 qubit gate for control-target format
 ===================================================================*/
-void X_gate2 (Type *q_rd){
+bool X_gate2 (Type *q_rd){
     int up_off = gate_move.half_ctrl;
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
@@ -448,9 +501,10 @@ void X_gate2 (Type *q_rd){
         up_off += (gate_move.large>>1);
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void Y_gate2 (Type *q_rd) {
+bool Y_gate2 (Type *q_rd) {
     int up_off = gate_move.half_ctrl;
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
@@ -474,9 +528,10 @@ void Y_gate2 (Type *q_rd) {
         up_off += (gate_move.large>>1);
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void Yc_gate2 (Type *q_rd) {
+bool Yc_gate2 (Type *q_rd) {
     int up_off = gate_move.half_ctrl;
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
@@ -500,9 +555,10 @@ void Yc_gate2 (Type *q_rd) {
         up_off += (gate_move.large>>1);
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void Z_gate2 (Type *q_rd) {
+bool Z_gate2 (Type *q_rd) {
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
 
@@ -518,9 +574,10 @@ void Z_gate2 (Type *q_rd) {
         }
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void P_gate2 (Type *q_rd) {
+bool P_gate2 (Type *q_rd) {
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
 
@@ -536,9 +593,10 @@ void P_gate2 (Type *q_rd) {
         }
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void Pc_gate2 (Type *q_rd) {
+bool Pc_gate2 (Type *q_rd) {
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_1r;    Type_t q_1i;
 
@@ -554,9 +612,10 @@ void Pc_gate2 (Type *q_rd) {
         }
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void U_gate2 (Type *q_rd) {
+bool U_gate2 (Type *q_rd) {
     int up_off = gate_move.half_ctrl;
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
@@ -580,9 +639,10 @@ void U_gate2 (Type *q_rd) {
         up_off += (gate_move.large>>1);
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
-void Uc_gate2 (Type *q_rd) {
+bool Uc_gate2 (Type *q_rd) {
     int up_off = gate_move.half_ctrl;
     int lo_off = gate_move.half_ctrl + gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
@@ -606,13 +666,14 @@ void Uc_gate2 (Type *q_rd) {
         up_off += (gate_move.large>>1);
         lo_off += (gate_move.large>>1);
     }
+    return 1;
 }
 
 /*===================================================================
 gate level (Type II)
 General 2 qubit gate
 ===================================================================*/
-void U2_gate (Type *q_rd) {
+bool U2_gate (Type *q_rd) {
     int q_00_off = 0;
     int q_01_off = gate_move.half_small;
     int q_10_off = gate_move.half_large;
@@ -622,6 +683,8 @@ void U2_gate (Type *q_rd) {
     Type_t q_01r;   Type_t q_01i;
     Type_t q_10r;   Type_t q_10i;
     Type_t q_11r;   Type_t q_11i;
+    int flag = 0;
+
     for (int i = 0; i < gate_size; i += gate_move.large) {
         for (int j = 0; j < gate_move.half_large; j += gate_move.small){
             for (int k = 0; k < gate_move.half_small; k++){
@@ -648,6 +711,14 @@ void U2_gate (Type *q_rd) {
                 q_rd[q_11_off].imag  = real[12]*q_00i + real[13]*q_01i + real[14]*q_10i + real[15]*q_11i;
                 q_rd[q_11_off].imag += imag[12]*q_00r + imag[13]*q_01r + imag[14]*q_10r + imag[15]*q_11r;
 
+                flag |= (q_00r != q_rd[q_00_off].real) || (q_00i != q_rd[q_00_off].imag)
+                                                       || (q_01r != q_rd[q_01_off].real) 
+                                                       || (q_01i != q_rd[q_01_off].imag)
+                                                       || (q_10r != q_rd[q_10_off].real) 
+                                                       || (q_10i != q_rd[q_10_off].imag)
+                                                       || (q_11r != q_rd[q_11_off].real) 
+                                                       || (q_11i != q_rd[q_11_off].imag);
+                
                 q_00_off++;     q_01_off++;
                 q_10_off++;     q_11_off++;
             }
@@ -657,10 +728,12 @@ void U2_gate (Type *q_rd) {
         q_00_off += gate_move.half_large;       q_01_off += gate_move.half_large;
         q_10_off += gate_move.half_large;       q_11_off += gate_move.half_large;
     }
+    return flag;
+    // return 1;
 }
 
 // General Conjugated 2-qubit Unitary gate.
-void U2c_gate (Type *q_rd) {
+bool U2c_gate (Type *q_rd) {
     int q_00_off = 0;
     int q_01_off = gate_move.half_small;
     int q_10_off = gate_move.half_large;
@@ -706,10 +779,11 @@ void U2c_gate (Type *q_rd) {
         q_00_off += gate_move.half_large;       q_01_off += gate_move.half_large;
         q_10_off += gate_move.half_large;       q_11_off += gate_move.half_large;
     }
+    return 1;
 }
 
 // SWAP gate.
-void SWAP_gate (Type *q_rd) {
+bool SWAP_gate (Type *q_rd) {
     int q_01_off = gate_move.half_small;
     int q_10_off = gate_move.half_large;
     Type_t q_01r;    Type_t q_01i;
@@ -736,6 +810,7 @@ void SWAP_gate (Type *q_rd) {
         q_01_off += gate_move.half_large;
         q_10_off += gate_move.half_large;
     }
+    return 1;
 }
 
 /*===================================================================
@@ -754,7 +829,7 @@ input: 指向一個存放gate_size這麼多state的buffer。
 功能: 對buffer內的state操作，使他們變成作用完gate之後的樣子
 ===================================================================*/
 
-void U3_gate (Type *q_rd){
+bool U3_gate (Type *q_rd){
     int q_000_off = 0;
     int q_001_off = gate_move.half_small;
     int q_010_off = gate_move.half_middle;
@@ -771,6 +846,7 @@ void U3_gate (Type *q_rd){
     Type_t q_101r;  Type_t q_101i;
     Type_t q_110r;  Type_t q_110i;
     Type_t q_111r;  Type_t q_111i;
+    int flag = 0;
 
     for (int i = 0; i < gate_size; i += gate_move.large) {
         for (int j = 0; j < gate_move.half_large; j += gate_move.middle){
@@ -866,6 +942,21 @@ void U3_gate (Type *q_rd){
                     q_rd[q_111_off].imag += imag[56]*q_000r + imag[57]*q_001r + imag[58]*q_010r + imag[59]*q_011r;
                     q_rd[q_111_off].imag += imag[60]*q_100r + imag[61]*q_101r + imag[62]*q_110r + imag[63]*q_111r;
 
+                    flag |= (q_000r != q_rd[q_000_off].real) || (q_000i != q_rd[q_000_off].imag)
+                                                             || (q_001r != q_rd[q_001_off].real)
+                                                             || (q_001i != q_rd[q_001_off].imag)
+                                                             || (q_010r != q_rd[q_010_off].real)
+                                                             || (q_010i != q_rd[q_010_off].imag)
+                                                             || (q_011r != q_rd[q_011_off].real)
+                                                             || (q_011i != q_rd[q_011_off].imag)
+                                                             || (q_100r != q_rd[q_100_off].real)
+                                                             || (q_100i != q_rd[q_100_off].imag)
+                                                             || (q_101r != q_rd[q_101_off].real)
+                                                             || (q_101i != q_rd[q_101_off].imag)
+                                                             || (q_110r != q_rd[q_110_off].real)
+                                                             || (q_110i != q_rd[q_110_off].imag)
+                                                             || (q_111r != q_rd[q_111_off].real)
+                                                             || (q_111i != q_rd[q_111_off].imag);
                     q_000_off++;    q_001_off++;
                     q_010_off++;    q_011_off++;
                     q_100_off++;    q_101_off++;
@@ -886,9 +977,11 @@ void U3_gate (Type *q_rd){
         q_100_off += gate_move.half_large;      q_101_off += gate_move.half_large;
         q_110_off += gate_move.half_large;      q_111_off += gate_move.half_large;
     }
+    return flag;
+    // return 1;
 };
 
-void U3c_gate (Type *q_rd){
+bool U3c_gate (Type *q_rd){
     int q_000_off = 0;
     int q_001_off = gate_move.half_small;
     int q_010_off = gate_move.half_middle;
@@ -1020,6 +1113,7 @@ void U3c_gate (Type *q_rd){
         q_100_off += gate_move.half_large;      q_101_off += gate_move.half_large;
         q_110_off += gate_move.half_large;      q_111_off += gate_move.half_large;
     }
+    return 1;
 };
 
 /*===================================================================
@@ -1035,7 +1129,7 @@ input: 指向一個存放gate_size這麼多state的buffer。
 功能: 對buffer內的state操作，使他們變成作用完gate之後的樣子
 ===================================================================*/
 
-void PreMeasure(Type *q_rd){
+bool PreMeasure(Type *q_rd){
     int up_off = 0;
     int lo_off = gate_move.half_targ;
     Type_t q_0r;    Type_t q_0i;
@@ -1060,24 +1154,10 @@ void PreMeasure(Type *q_rd){
         real[0] += p0;
         real[1] += p1;
     }
+    return 1;
 }
 
-void PreMeasureMPI(Type *q_rd){
-    Type_t q_r;    Type_t q_i;
-    double p0=0;
-    for (int i = 0; i < gate_size; i ++ ) {
-        q_r = q_rd[i].real;
-        q_i = q_rd[i].imag;
-        p0 += q_r*q_r + q_i*q_i;
-    }
-    
-    #pragma omp critical
-    {
-        real[0] += p0;
-    }
-}
-
-void Measure_0 (Type *q_rd) {
+bool Measure_0 (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
 
@@ -1093,9 +1173,10 @@ void Measure_0 (Type *q_rd) {
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return 1;
 }
 
-void Measure_1 (Type *q_rd) {
+bool Measure_1 (Type *q_rd) {
     int up_off = 0;
     int lo_off = gate_move.half_targ;
 
@@ -1111,4 +1192,5 @@ void Measure_1 (Type *q_rd) {
         up_off += gate_move.half_targ;
         lo_off += gate_move.half_targ;
     }
+    return 1;
 }

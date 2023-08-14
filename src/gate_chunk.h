@@ -1,30 +1,31 @@
 #ifndef GATE_CHUNK_H_
 #define GATE_CHUNK_H_
 
-void H_gate (Type *q_rd);
-void S_gate (Type *q_rd); void Sc_gate (Type *q_rd);
-void T_gate (Type *q_rd); void Tc_gate (Type *q_rd);
-void X_gate (Type *q_rd);
-void Y_gate (Type *q_rd); void Yc_gate (Type *q_rd);
-void Z_gate (Type *q_rd);
-void P_gate (Type *q_rd); void Pc_gate (Type *q_rd);
-void U_gate (Type *q_rd); void Uc_gate (Type *q_rd);
+#include <stdbool.h>
 
-void X_gate2 (Type *q_rd);
-void Y_gate2 (Type *q_rd); void Yc_gate2 (Type *q_rd);
-void Z_gate2 (Type *q_rd);
-void P_gate2 (Type *q_rd); void Pc_gate2 (Type *q_rd);
+bool H_gate (Type *q_rd);
+bool S_gate (Type *q_rd); bool Sc_gate (Type *q_rd);
+bool T_gate (Type *q_rd); bool Tc_gate (Type *q_rd);
+bool X_gate (Type *q_rd);
+bool Y_gate (Type *q_rd); bool Yc_gate (Type *q_rd);
+bool Z_gate (Type *q_rd);
+bool P_gate (Type *q_rd); bool Pc_gate (Type *q_rd);
+bool U_gate (Type *q_rd); bool Uc_gate (Type *q_rd);
 
-void U_gate2 (Type *q_rd); void Uc_gate2 (Type *q_rd);
-void U2_gate (Type *q_rd); void U2c_gate (Type *q_rd);
-void SWAP_gate (Type *q_rd);
-void U3_gate (Type *q_rd); void U3c_gate (Type *q_rd);
+bool X_gate2 (Type *q_rd);
+bool Y_gate2 (Type *q_rd); bool Yc_gate2 (Type *q_rd);
+bool Z_gate2 (Type *q_rd);
+bool P_gate2 (Type *q_rd); bool Pc_gate2 (Type *q_rd);
 
-void PreMeasure (Type *q_rd);
-void PreMeasureMPI (Type *q_rd);
-void Measure_0 (Type *q_rd);
-void Measure_1 (Type *q_rd);
+bool U_gate2 (Type *q_rd); bool Uc_gate2 (Type *q_rd);
+bool U2_gate (Type *q_rd); bool U2c_gate (Type *q_rd);
+bool SWAP_gate (Type *q_rd);
+bool U3_gate (Type *q_rd); bool U3c_gate (Type *q_rd);
 
-extern void (*gate_ops[16][2])(Type *);
+bool PreMeasure (Type *q_rd);
+bool Measure_0 (Type *q_rd);
+bool Measure_1 (Type *q_rd);
+
+extern bool (*gate_ops[16][2])(Type *);
 
 #endif

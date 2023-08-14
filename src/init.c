@@ -9,148 +9,109 @@
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <mpi.h>
+
 #include "ini.h"
 #include "init.h"
 #include "common.h"
 #include "gate.h"
 
-inline void set_buffer()
-{
-    thread_settings = (setStreamv2 *)malloc(num_thread * sizeof(setStreamv2));
-    for (int i = 0; i < num_thread; i++)
-    {
-        // for Direcet IO
-        if (mpi_segment == 0)
-        {
-            if (posix_memalign((void **)(&(thread_settings[i].rd)), 4096, 8 * chunk_size))
-                ;
-            memset(thread_settings[i].rd, 0.0, 8 * chunk_size);
-        }
-        else
-        {
-            if (posix_memalign((void **)(&(thread_settings[i].rd)), 4096, 15 * chunk_size))
-                ;
-            memset(thread_settings[i].rd, 0.0, 15 * chunk_size);
-        }
+inline void set_buffer() {
+    q_read = (Type*) malloc(buffer_size);
+    memset((void *) (q_read),  0.0, buffer_size);
+    thread_settings = (setStreamv2*)malloc(num_thread*sizeof(setStreamv2));
+    for (int i = 0; i < num_thread; i++){
+        thread_settings[i].rd = (void*)q_read + i * 8*chunk_size;
     }
-    fd_pair = (int *)malloc(num_file * sizeof(int));
-    td_pair = (int *)malloc(num_thread_per_file * sizeof(int));
+    fd_pair = (int*)malloc(num_file * sizeof(int));
+    td_pair = (int*)malloc(num_thread_per_file * sizeof(int));
 }
 
-inline void set_ini(char *path)
-{
+inline void set_ini(char *path) {
     // read from .ini file
     const char *section = "system";
     N = read_profile_int(section, "total_qbit", 0, path);
-    mpi_segment = read_profile_int(section, "device_qbit", 0, path);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    printf("**********\nworld size: %d, mpi_seg: %d\n", world_size, mpi_segment);
-    fflush(stdout);
-    assert(world_size == (1ULL << mpi_segment));
-    N = N - mpi_segment;
     thread_segment = read_profile_int(section, "thread_qbit", 0, path);
-    file_segment = read_profile_int(section, "file_qbit", 0, path);
+    file_segment = read_profile_int(section, "global_qbit", 0, path);
     para_segment = thread_segment - file_segment;
     chunk_segment = read_profile_int(section, "local_qbit", 0, path);
     max_path = read_profile_int(section, "max_path", 260, path);
-    // MAX_QUBIT = read_profile_int(section, "max_qbit", 38, path);
+    //MAX_QUBIT = read_profile_int(section, "max_qbit", 38, path);
     max_depth = read_profile_int(section, "max_depth", 1000, path);
-    IsDensity = read_profile_int(section, "is_density", 0, path);
-    IsDirectIO = read_profile_int(section, "directIO", 0, path);
+    IsDensity =  read_profile_int(section, "is_density", 0, path);
     SkipInithread_state = read_profile_int(section, "skip_init_state", 0, path);
     SetOfSaveState = read_profile_int(section, "set_of_save_state", 1, path);
-    int testing = read_profile_int(section, "testing", 0, path);
+    BATCH_SIZE = read_profile_int(section, "batch_size", 1, path);
+    NUM_PROVIDER = read_profile_int(section, "provider", 1, path);
+    int snapshot_GB = read_profile_int(section, "snapshot_GB", 0, path);
+    SNAPSHOT_SIZE = ((ull)snapshot_GB) << 30;
+    /* test */
+    // SNAPSHOT_SIZE = (1ULL) << 10;
     num_file = (1ULL << file_segment);
     num_thread = (1ULL << thread_segment);
-    half_num_thread = (1ULL << (thread_segment - 1));
-    quarter_num_thread = (1ULL << (thread_segment - 2));
-    eighth_num_thread = (1ULL << (thread_segment - 3));
+    half_num_thread = (1ULL << (thread_segment-1));
+    quarter_num_thread = (1ULL << (thread_segment-2));
+    eighth_num_thread = (1ULL << (thread_segment-3));
     num_thread_per_file = (1ULL << (para_segment));
-    file_state = (1ULL << (N - file_segment));
-    thread_state = (1ULL << (N - thread_segment));
+    file_state = (1ULL << (N-file_segment));
+    thread_state = (1ULL << (N-thread_segment));
     chunk_state = (1ULL << chunk_segment);
     file_size = file_state * sizeof(Type);
     thread_size = thread_state * sizeof(Type);
-    chunk_size = chunk_state * sizeof(Type);
-    if(mpi_segment == 0)
-    {
-        buffer_size = (num_thread * 8 * chunk_size);
-    }
-    else
-    {
-        buffer_size = (num_thread * 15 * chunk_size);
-    }
+    chunk_size = chunk_state*sizeof(Type);
+    buffer_size = (num_thread*8*chunk_size);
 
     printf("is density: %d\n", IsDensity);
-    char *state_form_ini = (char *)malloc(SetOfSaveState * num_file * max_path * sizeof(char));
-    state_paths = (char **)malloc(SetOfSaveState * num_file * sizeof(char *));
-    for (int i = 0; i < SetOfSaveState * num_file; i++)
-        state_paths[i] = (char *)malloc(max_path * sizeof(char));
+    char *state_form_ini = (char *) malloc(SetOfSaveState*num_file*max_path*sizeof(char));
+    state_paths = (char **) malloc(SetOfSaveState*num_file*sizeof(char*));
+    for(int i = 0; i < SetOfSaveState*num_file; i++)
+        state_paths[i] = (char *) malloc(max_path*sizeof(char));
     read_profile_string(section, "state_paths", state_form_ini,
-                        SetOfSaveState * num_file * max_path, "", path);
-
-    char *rank_string = (char *)malloc(max_path * sizeof(char));
-    char *path_cpy = (char *)malloc(max_path * sizeof(char));
-    char *d = "./state";
-    sprintf(rank_string, "%d", rank);
+        SetOfSaveState*num_file*max_path, "", path);
 
     char *token = strtok(state_form_ini, ",");
     int cnt = 0;
-    if(testing == 0)
-    {
-        while(token != NULL) {
-            //printf("Token no. %d : %s, len: %lu \n", cnt, token, strlen(token));
-            //printf("Dir name: %s \n", dirname(token));
-            if(cnt < SetOfSaveState*num_file)
-                strcpy(state_paths[cnt], token);
-            token = strtok(NULL, ",");
-            cnt++;
-        }
+    while(token != NULL) {
+        //printf("Token no. %d : %s, len: %lu \n", cnt, token, strlen(token));
+	    //printf("Dir name: %s \n", dirname(token));
+        if(cnt < SetOfSaveState*num_file)
+            strcpy(state_paths[cnt], token);
+	    token = strtok(NULL, ",");
+        cnt++;
     }
-    else
-    {
-        while(token != NULL) {
-            strcpy(path_cpy,d);
-            strcat(path_cpy,rank_string);
-            strcat(path_cpy,"/");
-            for(int i=8;i<strlen(token);i++)
-            {
-                strncat(path_cpy,&token[i],1);
-            }
-            //printf("Token no. %d : %s, len: %lu \n", cnt, token, strlen(token));
-            //printf("Dir name: %s \n", dirname(token));
-            if(cnt < SetOfSaveState*num_file)
-            {
-                strcpy(state_paths[cnt], path_cpy);
-            }
-            token = strtok(NULL, ",");
-            cnt++;
+
+    printf("num_provider = %d\n", NUM_PROVIDER);
+    PROVIDER_IP = (char **) malloc (NUM_PROVIDER*sizeof(char*));
+    read_profile_string(section, "ip", state_form_ini,
+        SetOfSaveState*num_file*max_path, "", path);
+    token = strtok(state_form_ini, ",");
+    cnt = 0;
+    while(token != NULL) {
+        printf("Token no. %d : %s, len: %lu \n", cnt, token, strlen(token));
+	    //printf("Dir name: %s \n", dirname(token));
+        if(cnt < NUM_PROVIDER) {
+            PROVIDER_IP[cnt] = (char*) malloc (20 * sizeof(char));
+            strcpy(PROVIDER_IP[cnt], token);
         }
+	    token = strtok(NULL, ",");
+        cnt++;
     }
-    
+
     // assert for invalid case
-    assert(N >= (thread_segment + chunk_segment));
-    // assert (N <= MAX_QUBIT);
-    // assert (thread_segment == file_segment);
-    // assert ((file_segment + chunk_segment) < N);
-    // since thread_seg >= file_seg,  thread_seg+chunk_seg >= file_seg+chunk_seg, we have N >= thread_seg+chunk_seg >= file_seg+chunk_seg
+    //assert (N <= MAX_QUBIT);
+    assert (N >= (thread_segment + chunk_segment));
+    assert (thread_segment >= file_segment);
+    // assert ((file_segment + chunk_segment) < N); // since thread_segment > file_segment,  thread_segment+chunk_segment > file_segment+chunk_segment, we have N >= thread_segment+chunk_segment > file_segment+chunk_segment
     free(token);
-    free(rank_string);
-    free(path_cpy);
     return;
 }
 
-inline void set_circuit(char *path)
-{
+inline void set_circuit(char *path) {
     FILE *circuit;
-    if ((circuit = fopen(path, "r")) == NULL)
-    {
+    if((circuit = fopen(path, "r"))== NULL) {
         printf("no circuit file.\n");
         exit(1);
     }
-    if (fscanf(circuit, "%d", &total_gate))
-        ;
+    if(fscanf(circuit, "%d", &total_gate));
     assert(total_gate < max_depth);
 
     set_gates(circuit);
@@ -160,24 +121,21 @@ inline void set_circuit(char *path)
 }
 
 // change the gate for |xy> to the gate for |yx>
-void rotate_axis_4x4(gate *g, int q0, int q1)
-{
-    if (q0 < q1)
-        return;
+void rotate_axis_4x4(gate *g, int q0, int q1){
+    if (q0 < q1) return;
     printf("rotating...\n");
     g->targs[0] = q1;
     g->targs[1] = q0;
     Type_t *tmp_r = (Type_t *)malloc(16 * sizeof(Type_t));
     Type_t *tmp_i = (Type_t *)malloc(16 * sizeof(Type_t));
     int b[4];
-    for (int i = 0; i < 16; i++)
-    {
-        b[3] = i & 1;
-        b[2] = (i & 2) >> 1;
-        b[1] = (i & 4) >> 2;
-        b[0] = (i & 8) >> 3;
+    for(int i = 0; i < 16; i++){
+        b[3] = i&1;
+        b[2] = (i&2)>>1;
+        b[1] = (i&4)>>2;
+        b[0] = (i&8)>>3;
 
-        int k = b[1] << 3 | b[0] << 2 | b[3] << 1 | b[2];
+        int k = b[1]<<3 | b[0]<<2 | b[3]<<1 | b[2];
 
         tmp_r[i] = g->real_matrix[k];
         tmp_i[i] = g->imag_matrix[k];
@@ -188,133 +146,97 @@ void rotate_axis_4x4(gate *g, int q0, int q1)
     // tmp[ 8]=mat[ 4]; tmp[ 9]=mat[ 6]; tmp[10]=mat[ 5]; tmp[11]=mat[ 7];
     // tmp[12]=mat[12]; tmp[13]=mat[14]; tmp[14]=mat[13]; tmp[15]=mat[15];
 
-    for (int i = 0; i < 16; i++)
-    {
+    for(int i = 0; i < 16; i++){
         g->real_matrix[i] = tmp_r[i];
         g->imag_matrix[i] = tmp_i[i];
     }
 }
 
-void rotate_axis_8x8(gate *g, int q0, int q1, int q2)
-{
-    if (q0 < q1 && q1 < q2)
-        return;
+void rotate_axis_8x8(gate *g, int q0, int q1, int q2){
+    if(q0 < q1 && q1 < q2) return;
     printf("rotating...\n");
 
     Type_t *tmp_r = (Type_t *)malloc(64 * sizeof(Type_t));
     Type_t *tmp_i = (Type_t *)malloc(64 * sizeof(Type_t));
     int order[3];
-    if (q0 < q2 && q2 < q1)
-    {
-        order[0] = 0;
-        order[1] = 2;
-        order[2] = 1;
-        g->targs[1] = q2;
-        g->targs[2] = q1;
+    if(q0 < q2 && q2 < q1){
+        order[0] = 0; order[1] = 2; order[2] = 1;
+        g->targs[1] = q2;        g->targs[2] = q1;
     }
-    else if (q1 < q0 && q0 < q2)
-    {
-        order[0] = 1;
-        order[1] = 0;
-        order[2] = 2;
-        g->targs[0] = q1;
-        g->targs[1] = q0;
+    else if(q1 < q0 && q0 < q2){
+        order[0] = 1; order[1] = 0; order[2] = 2;
+        g->targs[0] = q1;        g->targs[1] = q0;
     }
-    else if (q1 < q2 && q2 < q0)
-    {
-        order[0] = 1;
-        order[1] = 2;
-        order[2] = 0;
-        g->targs[0] = q1;
-        g->targs[1] = q2;
-        g->targs[2] = q0;
+    else if(q1 < q2 && q2 < q0){
+        order[0] = 1; order[1] = 2; order[2] = 0;
+        g->targs[0] = q1;        g->targs[1] = q2;        g->targs[2] = q0;
     }
-    else if (q2 < q0 && q0 < q1)
-    {
-        order[0] = 2;
-        order[1] = 0;
-        order[2] = 1;
-        g->targs[0] = q2;
-        g->targs[1] = q0;
-        g->targs[2] = q1;
+    else if(q2 < q0 && q0 < q1){
+        order[0] = 2; order[1] = 0; order[2] = 1;
+        g->targs[0] = q2;        g->targs[1] = q0;        g->targs[2] = q1;
     }
-    else if (q2 < q1 && q1 < q0)
-    {
-        order[0] = 2;
-        order[1] = 1;
-        order[2] = 0;
-        g->targs[0] = q2;
-        g->targs[2] = q0;
+    else if(q2 < q1 && q1 < q0){
+        order[0] = 2; order[1] = 1; order[2] = 0;
+        g->targs[0] = q2;        g->targs[2] = q0;
     }
 
     int b[6];
-    for (int i = 0; i < 64; i++)
-    {
-        b[5] = i & 1;
-        b[4] = (i & 2) >> 1;
-        b[3] = (i & 4) >> 2;
-        b[2] = (i & 8) >> 3;
-        b[1] = (i & 16) >> 4;
-        b[0] = (i & 32) >> 5;
+    for(int i = 0; i < 64; i++){
+        b[5] = i&1;
+        b[4] = (i&2)>>1;
+        b[3] = (i&4)>>2;
+        b[2] = (i&8)>>3;
+        b[1] = (i&16)>>4;
+        b[0] = (i&32)>>5;
 
-        int k = (b[order[0]] << 2) | (b[order[1]] << 1) | (b[order[2]]);
-        k = (k << 3) | (b[order[0] + 3] << 2) | (b[order[1] + 3] << 1) | (b[order[2] + 3]);
+        int k = (b[order[0]]<<2) | (b[order[1]]<<1) | (b[order[2]]);
+        k = (k<<3) | (b[order[0]+3]<<2) | (b[order[1]+3]<<1) | (b[order[2]+3]);
 
         tmp_r[k] = g->real_matrix[i];
         tmp_i[k] = g->imag_matrix[i];
     }
 
-    for (int i = 0; i < 64; i++)
-    {
+    for(int i = 0; i < 64; i++){
         g->real_matrix[i] = tmp_r[i];
         g->imag_matrix[i] = tmp_i[i];
     }
 }
 
-inline void set_gates(FILE *circuit)
-{
-    gateMap = (gate *)malloc(total_gate * sizeof(gate));
+inline void set_gates(FILE *circuit) {
+    gateMap = (gate*) malloc(total_gate*sizeof(gate));
     for (int i = 0; i < total_gate; i++)
-        gateMap[i].active = 1; // default is not to execute the gate
-    for (int i = 0; i < total_gate; i++)
-    {
+        gateMap[i].action = 0; // default is not to execute the gate
+    for (int i = 0; i < total_gate; i++) {
         gate g;
-        if (fscanf(circuit, "%d%d%d%d",
-                   (int *)&g.gate_ops, &g.numCtrls, &g.numTargs, &g.val_num))
-            ;
+        if(fscanf(circuit, "%d%d%d%d",
+            &g.gate_ops, &g.numCtrls, &g.numTargs, &g.val_num));
         for (int j = 0; j < g.numCtrls; j++)
-            if (fscanf(circuit, "%d", &g.ctrls[j]))
-                ;
+            if(fscanf(circuit, "%d", &g.ctrls[j]));
         for (int j = 0; j < g.numTargs; j++)
-            if (fscanf(circuit, "%d", &g.targs[j]))
-                ;
+            if(fscanf(circuit, "%d", &g.targs[j]));
 
-        g.real_matrix = (Type_t *)malloc(g.val_num * sizeof(Type_t));
-        g.imag_matrix = (Type_t *)malloc(g.val_num * sizeof(Type_t));
+        g.real_matrix = (Type_t*) malloc(g.val_num*sizeof(Type_t));
+        g.imag_matrix = (Type_t*) malloc(g.val_num*sizeof(Type_t));
         for (int j = 0; j < g.val_num; j++)
-            if (fscanf(circuit, "%lf", &g.real_matrix[j]))
-                ;
+            if(fscanf(circuit, "%lf", &g.real_matrix[j]));
         for (int j = 0; j < g.val_num; j++)
-            if (fscanf(circuit, "%lf", &g.imag_matrix[j]))
-                ;
+            if(fscanf(circuit, "%lf", &g.imag_matrix[j]));
 
-        if (g.gate_ops == 13 && g.targs[0] > g.targs[1])
-        { // SWAP
+        if(g.gate_ops == 13 && g.targs[0] > g.targs[1]){ //SWAP
             int tmp = g.targs[0];
             g.targs[0] = g.targs[1];
             g.targs[1] = tmp;
         }
 
-        if (g.gate_ops == 31)
-        { // Unitary 2 qubit Gate
+        if(g.gate_ops == 31){ //Unitary 2 qubit Gate
             rotate_axis_4x4(&g, g.targs[0], g.targs[1]);
         }
 
-        if (g.gate_ops == 32)
-        { // Unitary 3 qubit Gate
+        if(g.gate_ops == 32){ //Unitary 3 qubit Gate
             rotate_axis_8x8(&g, g.targs[0], g.targs[1], g.targs[2]);
         }
 
+        g.action = 1;
         gateMap[i] = g; // add the gate to the gatMpa
         // print_gate(&g); //print the gate
     }
@@ -341,166 +263,192 @@ inline void set_gates(FILE *circuit)
 //     }
 // }
 
-void set_state_files()
-{
-    // fd_arr malloc
-    fd_arr_set = (int **)malloc(SetOfSaveState * sizeof(int *));
-    for (int i = 0; i <= SetOfSaveState; i++)
-    {
-        fd_arr_set[i] = (int *)malloc(num_file * sizeof(int));
-    }
-    fd_arr = fd_arr_set[0];
+void set_state_files() {
 
-    // create the directories of the output path and touch them
-    if (SkipInithread_state)
-    {
-        for (int i = 0; i < SetOfSaveState * num_file; i++)
-        {
-            if (!file_exists(state_paths[i]))
-            {
+#ifndef MEMORY
+    // fd_arr malloc
+    fd_arr_set = (int**) malloc(SetOfSaveState*sizeof(int*));
+    for (int i = 0; i <= SetOfSaveState; i++){
+        fd_arr_set[i] = (int*) malloc(num_file*sizeof(int));
+    }
+
+    fd_arr = fd_arr_set[0];
+#endif
+
+    // create the dir of the output path and touch them
+    if(SkipInithread_state){
+        for(int i = 0; i < SetOfSaveState*num_file; i++) {
+            if (!file_exists(state_paths[i])){
                 printf("[FILE]: %s skip init but not exists.\n", state_paths[i]);
                 exit(-1);
             }
-            if (IsDirectIO)
-                fd_arr_set[i / num_file][i % num_file] = open(state_paths[i], O_RDWR | O_DIRECT, 0666);
-            else
-                fd_arr_set[i / num_file][i % num_file] = open(state_paths[i], O_RDWR, 0666);
-            assert(fd_arr_set[i / num_file][i % num_file] > 0);
-            printf("Rank: %d [FILE]: previous state %s open success!, fd: %2d \n", rank, state_paths[i], fd_arr_set[i / num_file][i % num_file]);
-            // printf("[FILE]: previous state %s open success!, fd: %2d \n", state_paths[i], fd_arr_set[i/num_file][i%num_file]);
-            lseek(fd_arr_set[i / num_file][i % num_file], 0, SEEK_SET);
+            fd_arr_set[i/num_file][i%num_file] = open(state_paths[i], O_RDWR);
+            assert(fd_arr_set[i/num_file][i%num_file] > 0);
+            printf("[SkipInithread_state FILE]: previous state %s open success!, fd: %2d \n", state_paths[i], fd_arr_set[i/num_file][i%num_file]);
+            lseek(fd_arr_set[i/num_file][i%num_file], 0, SEEK_SET);
         }
         return;
     }
-    char *state_dir = (char *)malloc(max_path * sizeof(char));
 
-    for (int i = 0; i < SetOfSaveState * num_file; i++)
-    {
+    char *state_dir = (char *) malloc(max_path*sizeof(char));
+    for(int i = 0; i < SetOfSaveState*num_file; i++) {
         strcpy(state_dir, state_paths[i]);
         int md = mk_dir(dirname(state_dir));
-        if (md != -1)
-        {
+        if (md != -1) {
             if (file_exists(state_paths[i]))
                 remove(state_paths[i]);
-
-            if (IsDirectIO)
-                fd_arr_set[i / num_file][i % num_file] = open(state_paths[i], O_RDWR | O_CREAT | O_DIRECT, 0666);
-            else
-                fd_arr_set[i / num_file][i % num_file] = open(state_paths[i], O_RDWR | O_CREAT, 0666);
-
-            assert(fd_arr_set[i / num_file][i % num_file] > 0);
-            printf("Rank: %d [FILE]: %s create success!, fd: %2d \n", rank, state_paths[i], fd_arr_set[i / num_file][i % num_file]);
-            // printf("[FILE]: %s create success!, fd: %2d \n", state_paths[i], fd_arr_set[i/num_file][i%num_file]);
-            lseek(fd_arr_set[i / num_file][i % num_file], 0, SEEK_SET);
+            fd_arr_set[i/num_file][i%num_file] = open(state_paths[i], O_RDWR|O_CREAT, 0777);
+            assert(fd_arr_set[i/num_file][i%num_file] > 0);
+#ifdef DEBUG
+            printf("[FILE]: %s create success!, fd: %2d \n", state_paths[i], fd_arr_set[i/num_file][i%num_file]);
+#endif
+            lseek(fd_arr_set[i/num_file][i%num_file], 0, SEEK_SET);
         }
     }
     free(state_dir);
-// init files: reset all strings in file as 0
-// use "od -tfD [file_name] to verify"
-#pragma omp parallel for num_threads(num_thread) schedule(static, 1)
-    for (int t = 0; t < num_thread; t++)
-    {
 
-        int f = t / num_thread_per_file;
-        int td = t % num_thread_per_file;
-        for (int set = 0; set < SetOfSaveState; set++)
-        {
+    // init files: reset all strings in file as 0
+    // use "od -tfD [file_name] to verify"
+    #pragma omp parallel for num_threads(num_thread) schedule(static, 1)
+    for (int t = 0; t < num_thread; t++) {
+
+        int f = t/num_thread_per_file;
+        int td = t%num_thread_per_file;
+        for(int set = 0; set < SetOfSaveState; set++){
             ull fd = fd_arr_set[set][f];
             ull t_off = t * chunk_size;
             void *wr = thread_settings[t].rd;
             ull fd_off = td * thread_size;
-            for (ull sz = 0; sz < thread_state; sz += chunk_state)
-            {
+            for (ull sz = 0; sz < thread_state; sz += chunk_state) {
                 pwrite(fd, wr, chunk_size, fd_off);
                 fd_off += chunk_size;
             }
+
+            if (t == 0) {
+                q_read[0].real = 1.;
+                q_read[0].imag = 0.;
+                pwrite(fd, q_read, sizeof(Type), 0);
+
+            }
         }
     }
-    if(rank == 0)
-    {
-        ((Type *)(thread_settings[0].rd))[0].real = 1.;
-        ((Type *)(thread_settings[0].rd))[0].imag = 0.;
-    }
-    for (int set = 0; set < SetOfSaveState; set++)
-    {
-        if (IsDirectIO)
-        {
-            if (pwrite(fd_arr_set[set][0], thread_settings[0].rd, 4096, 0))
-                ;
-        }
-        else
-        {
-            if (pwrite(fd_arr_set[set][0], thread_settings[0].rd, sizeof(Type), 0))
-                ;
-        }
-    }
+
+    fflush(stdout);
 }
 
-void set_all(char *ini, char *cir)
-{
+void set_rdma_connection() {
+
+    client = (struct rdma_client_t *) malloc (sizeof(struct rdma_client_t) * num_file);
+    char dev_name[4][10] = {"mlx5_0", "mlx5_0", "mlx5_0", "mlx5_0"};
+
+    printf("file_size = %lld\n", file_size);
+
+    #pragma omp parallel for
+    for (int i = 0; i < num_file; i++) {
+
+        ull mr_size = BATCH_SIZE * chunk_size * 8;
+        MR_SIZE = mr_size;
+
+        for (int node = 0; node < NUM_PROVIDER; node++) {
+            if (i % NUM_PROVIDER == node) {
+                client_start(client + i, PROVIDER_IP[node], 20886 + i / NUM_PROVIDER, mr_size * 2, dev_name[node]);
+            
+                if (SNAPSHOT_SIZE) {
+                    if ((client[i].local_cache = malloc(SNAPSHOT_SIZE)) == NULL)
+                        exit(-1);
+                    memset(client[i].local_cache, 0, SNAPSHOT_SIZE);
+                }
+                break;
+            }
+        }
+
+        if (i == 0) {
+            q_read[0].real = 1.;
+            q_read[0].imag = 0.;
+            memcpy(client[i].buffer, q_read, sizeof(Type));
+            if (SNAPSHOT_SIZE) {
+                printf("SNAPSHOT_SIZE = %lld\n", SNAPSHOT_SIZE);
+                memcpy(client[i].local_cache, q_read, sizeof(Type));
+            }
+            write_remote(client, 0, 0, sizeof(Type), 0);
+            poll_cq_batch(client, 1);
+            printf("Has written to remote\n");
+        }
+    }
+
+    // fd_arr malloc
+    fd_arr_set = (int**) malloc(SetOfSaveState * sizeof(int*));
+    for (int i = 0; i <= SetOfSaveState; i++){
+        fd_arr_set[i] = (int*) malloc(num_file * sizeof(int));
+        memset(fd_arr_set[i], 0, num_file * sizeof(int));
+    }
+
+    fd_arr = fd_arr_set[0];
+
+}
+
+void set_all(char *ini, char *cir) {
     set_ini(ini);
     set_circuit(cir);
     set_buffer();
+#ifdef MEMORY
+    set_rdma_connection();
+#endif
+#ifdef WRITE_FILE
     set_state_files();
-    printf("[Rank %d] Initialized.\n", rank);
+#endif
 }
 
-inline int read_args(int argc, char *argv[], char **ini, char **cir)
-{
+inline int read_args(int argc, char* argv[], char **ini, char **cir) {
     int cmd_opt = 0;
     int ret_val = 0;
     size_t destination_size;
-    // fprintf(stderr, "argc:%d\n", argc);
-    while (1)
-    {
-        // fprintf(stderr, "proces index:%d\n", optind);
+    //fprintf(stderr, "argc:%d\n", argc);
+    while(1) {
+        //fprintf(stderr, "proces index:%d\n", optind);
         cmd_opt = getopt(argc, argv, "vc:i:");
         /* End condition always first */
-        if (cmd_opt == -1)
-        {
+        if (cmd_opt == -1) {
             break;
         }
         /* Print option when it is valid */
-        // if (cmd_opt != '?') {
-        //     fprintf(stderr, "option:-%c\n", cmd_opt);
-        // }
+        //if (cmd_opt != '?') {
+        //    fprintf(stderr, "option:-%c\n", cmd_opt);
+        //}
         /* Lets parse */
-        switch (cmd_opt)
-        {
-        case 'v':
-            break;
-        /* Single arg */
-        case 'c':
-            destination_size = strlen(optarg);
-            *cir = (char *)malloc(sizeof(char) * destination_size);
-            strncpy(*cir, optarg, destination_size);
-            (*cir)[destination_size] = '\0';
-            ++ret_val;
-            break;
-        case 'i':
-            // fprintf(stderr, "option arg:%s\n", optarg);
-            destination_size = strlen(optarg);
-            *ini = (char *)malloc(sizeof(char) * destination_size);
-            strncpy(*ini, optarg, destination_size);
-            (*ini)[destination_size] = '\0';
-            ++ret_val;
-            break;
-        /* Error handle: Mainly missing arg or illegal option */
-        case '?':
-            fprintf(stderr, "Illegal option:-%c\n", isprint(optopt) ? optopt : '#');
-            ret_val = 0;
-            break;
-        default:
-            fprintf(stderr, "Not supported option\n");
-            break;
+        switch (cmd_opt) {
+            case 'v':
+                break;
+            /* Single arg */
+            case 'c':
+                destination_size = strlen(optarg);
+                *cir = (char *) malloc(sizeof(char) * destination_size);
+                strncpy(*cir, optarg, destination_size);
+                (*cir)[destination_size] = '\0';
+                ++ret_val;
+                break;
+            case 'i':
+                // fprintf(stderr, "option arg:%s\n", optarg);
+                destination_size = strlen(optarg);
+                *ini = (char *) malloc(sizeof(char) * destination_size);
+                strncpy(*ini, optarg, destination_size);
+                (*ini)[destination_size] = '\0';
+                ++ret_val;
+                break;
+            /* Error handle: Mainly missing arg or illegal option */
+            case '?':
+                fprintf(stderr, "Illegal option:-%c\n", isprint(optopt)?optopt:'#');
+                ret_val = 0;
+                break;
+            default:
+                fprintf(stderr, "Not supported option\n");
+                break;
         }
     }
     /* Do we have args? */
-    if (argc > optind)
-    {
+    if (argc > optind) {
         int i = 0;
-        for (i = optind; i < argc; i++)
-        {
+        for (i = optind; i < argc; i++) {
             fprintf(stderr, "argv[%d] = %s\n", i, argv[i]);
         }
         ret_val = 0;

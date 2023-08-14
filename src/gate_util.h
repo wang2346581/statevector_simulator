@@ -1,15 +1,17 @@
 #ifndef GATE_UTIL_H_
 #define GATE_UTIL_H_
 
+#include <stdbool.h>
+
 // typedef
 
 /* gate_args guide
     主結構為for-loop
-
+    
     Gate in Type I:
     for i in range(0, gate_size, "targ"):
         for k in range(0, "half_targ"):
-
+    
     Gate in Type II:
     for i in range(0, gate_size, "large"):
         for j in range(0, "half_large", "small"):
@@ -31,8 +33,8 @@ extern Type_t *real;
 extern Type_t *imag;
 
 extern int gate_size;
-extern void (*gate_func)(Type *);
-extern void (*inner_loop_func)(unsigned long long, void*, int*, unsigned long long*);
+extern bool (*gate_func)(Type *);
+extern void (*inner_loop_func)(unsigned long long, void*, int*, int*, unsigned long long*, int*);
 extern unsigned long long loop_size;
 extern unsigned long long _outer;
 extern unsigned long long _half_outer;
@@ -56,27 +58,21 @@ extern unsigned long long half_targ_offset;
 extern int *fd_pair;
 extern int *td_pair;
 
-void _thread_CX(setStreamv2 *s);
-void _thread_CX_MPI_0(setStreamv2 *s);
-void _thread_CX_MPI_1(setStreamv2 *s);
-void _thread_CX2_MPI_0(setStreamv2 *s);
-void _thread_CX2_MPI_1(setStreamv2 *s);
-void _swap_thread_CX_MPI_0(setStreamv2 *s);
-void _swap_thread_CX_MPI_1(setStreamv2 *s);
-void _thread_CX2(setStreamv2 *s);
-void _thread_CX4(setStreamv2 *s);
-void _thread_CX8(setStreamv2 *s);
+void _thread_CX(setStreamv2 *s, int *counter);
+void _thread_CX2(setStreamv2 *s, int *counter);
+void _thread_CX4(setStreamv2 *s, int *counter);
+void _thread_CX8(setStreamv2 *s, int *counter);
 void set_up_lo(int ctrl, int targ);
 
-void inner_loop(ull size, void *rd, int fd[1], ull fd_off[1]);
-void inner_loop_read(ull size, void *rd, int fd[1], ull fd_off[1]);
+void inner_loop(ull size, void *rd, int fd[1], int fd_index[1], ull fd_off[1], int *counter);
+void inner_loop_read(ull size, void *rd, int fd[1], int fd_index[1], ull fd_off[1], int *counter);
 
-void inner_loop2(ull size, void *rd, int fd[2], ull fd_off[2]);
-void inner_loop2_read(ull size, void *rd, int fd[2], ull fd_off[2]);
-void inner_loop2_swap(ull size, void *rd, int fd[2], ull fd_off[2]);
+void inner_loop2(ull size, void *rd, int fd[2], int fd_index[2], ull fd_off[2], int *counter);
+void inner_loop2_read(ull size, void *rd, int fd[2], int fd_index[2], ull fd_off[2], int *counter);
+void inner_loop2_swap(ull size, void *rd, int fd[2], int fd_index[2], ull fd_off[2], int *counter);
 
-void inner_loop4(ull size, void *rd, int fd[4], ull fd_off[4]);
-void inner_loop8(ull size, void *rd, int fd[8], ull fd_off[8]);
+void inner_loop4(ull size, void *rd, int fd[4], int fd_index[4], ull fd_off[4], int *counter);
+void inner_loop8(ull size, void *rd, int fd[8], int fd_index[8], ull fd_off[8], int *counter);
 
 void make_targ_pair(const int n, const int targ, int *pair_list);
 void make_work_pair(const int n, const int ctrl, const int targ, int *pair_list);
